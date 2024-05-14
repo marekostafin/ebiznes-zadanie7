@@ -1,104 +1,74 @@
 package main
 
 import (
-	"encoding/json"
-	"github.com/labstack/echo/v4"
-	"gorm.io/driver/sqlite"
-	_ "gorm.io/driver/sqlite"
-	"gorm.io/gorm"
-	"io"
 	"net/http"
+	"strconv"
+
+	"github.com/labstack/echo/v4"
 )
 
-type WeatherData struct {
-	gorm.Model
-	Time             string  `json:"time"`
-	Temperature2mMax float64 `json:"temperature_2m_max"`
-	Temperature2mMin float64 `json:"temperature_2m_min"`
+var products = []string{"Ciasto", "Placek", "Tort"}
+
+func createProduct(c echo.Context) error {
+	product := c.FormValue("product")
+	products = append(products, product)
+	return c.JSON(http.StatusCreated, product)
 }
 
-type WeatherResponse struct {
-	Daily struct {
-		Time             []string  `json:"time"`
-		Temperature2mMax []float64 `json:"temperature_2m_max"`
-		Temperature2mMin []float64 `json:"temperature_2m_min"`
-	} `json:"daily"`
+func getProducts(c echo.Context) error {
+	return c.JSON(http.StatusOK, products)
 }
 
-type WeatherResponseFin struct {
-	Daily struct {
-		Time             string  `json:"time"`
-		Temperature2mMax float64 `json:"temperature_2m_max"`
-		Temperature2mMin float64 `json:"temperature_2m_min"`
-	} `json:"daily"`
+func getProduct(c echo.Context) error {
+	id := c.Param("id")
+	productId, err := strconv.Atoi(id)
+	if err != nil {
+		return err
+	}
+	product := products[productId]
+	if product == "" {
+		return c.JSON(http.StatusNotFound, "Product not found")
+	}
+	return c.JSON(http.StatusOK, product)
 }
 
-type Proxy struct{}
-
-func (w *Proxy) GetWeather() (WeatherResponseFin, error) {
-	resp, err := http.Get("https://api.open-meteo.com/v1/forecast?latitude=50.0614&longitude=19.9366&daily=temperature_2m_max,temperature_2m_min&timezone=Europe%2FBerlin&forecast_days=1")
+func updateProduct(c echo.Context) error {
+	id := c.Param("id")
+	productId, err := strconv.Atoi(id)
 	if err != nil {
-		return WeatherResponseFin{}, err
+		return err
 	}
-	defer resp.Body.Close()
+	product := c.FormValue("product")
+	if products[productId] == "" {
+		return c.JSON(http.StatusNotFound, "Product not found")
+	}
+	products[productId] = product
+	return c.JSON(http.StatusOK, product)
+}
 
-	body, err := io.ReadAll(resp.Body)
+func deleteProduct(c echo.Context) error {
+	id := c.Param("id")
+	productId, err := strconv.Atoi(id)
 	if err != nil {
-		return WeatherResponseFin{}, err
+		return err
 	}
-
-	var weatherResponse WeatherResponse
-	err = json.Unmarshal(body, &weatherResponse)
-	if err != nil {
-		return WeatherResponseFin{}, err
+	if products[productId] == "" {
+		return c.JSON(http.StatusNotFound, "Product not found")
 	}
-
-	var weatherResponseFin WeatherResponseFin
-	weatherResponseFin.Daily.Time = weatherResponse.Daily.Time[0]
-	weatherResponseFin.Daily.Temperature2mMax = weatherResponse.Daily.Temperature2mMax[0]
-	weatherResponseFin.Daily.Temperature2mMin = weatherResponse.Daily.Temperature2mMin[0]
-
-	return weatherResponseFin, nil
+	products = append(products[:productId], products[productId+1:]...)
+	return c.NoContent(http.StatusNoContent)
 }
 
 func main() {
 	e := echo.New()
-	proxy := &Proxy{}
-
-	db, err := gorm.Open(sqlite.Open("weather.db"), &gorm.Config{})
-	if err != nil {
-		panic("failed to connect to the database")
-	}
-	err = db.AutoMigrate(&WeatherData{})
-	if err != nil {
-		panic("failed to migrate database")
-	}
-
-	e.GET("/weather", func(c echo.Context) error {
-		weatherResponse, err := proxy.GetWeather()
-		if err != nil {
-			return err
-		}
-
-		var weatherData WeatherData
-		weatherData.Time = weatherResponse.Daily.Time
-		weatherData.Temperature2mMin = weatherResponse.Daily.Temperature2mMin
-		weatherData.Temperature2mMax = weatherResponse.Daily.Temperature2mMax
-		if err := db.Create(&weatherData).Error; err != nil {
-			return err
-		}
-
-		return c.JSON(http.StatusOK, weatherResponse)
+	e.GET("/", func(c echo.Context) error {
+		return c.String(http.StatusOK, "Hello, World!")
 	})
-
-	e.GET("/db", func(c echo.Context) error {
-		var weatherData []WeatherData
-		result := db.Find(&weatherData)
-		if result.Error != nil {
-			return result.Error
-		}
-		return c.JSON(http.StatusOK, weatherData)
-	})
+	e.POST("/products", createProduct)
+	e.GET("/products", getProducts)
+	e.GET("/products/:id", getProduct)
+	e.PUT("/products/:id", updateProduct)
+	e.DELETE("/products/:id", deleteProduct)
 
 	e.Logger.Fatal(e.Start(":1323"))
 }
